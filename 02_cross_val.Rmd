@@ -1,0 +1,43 @@
+## Parallel Cross-Validation
+
+Spark 2.3 supports parallelism in hyperparameter tuning. In other words, instead of training each model specification serially, you can now train them in parallel. This can be enabled by setting the parallelism parameter in ml_cross_validator() or ml_train_split_validation(). Here’s an example:
+
+```{r library_load}
+library(sparklyr)
+sc <- spark_connect(master = "local", version = "2.3.0")
+iris_tbl <- sdf_copy_to(sc, iris)
+
+# Define the pipeline
+labels <- c("setosa", "versicolor", "virginica")
+pipeline <- ml_pipeline(sc) %>%
+  ft_vector_assembler(
+    c("Sepal_Width", "Sepal_Length", "Petal_Width", "Petal_Length"),
+    "features"
+  ) %>%
+  ft_string_indexer_model("Species", "label", labels = labels) %>%
+  ml_logistic_regression()
+
+# Specify hyperparameter grid
+grid <- list(
+  logistic = list(
+    elastic_net_param = c(0.25, 0.75),
+    reg_param = c(1e-3, 1e-4)
+  )
+)
+
+# Create the cross validator object
+cv <- ml_cross_validator(
+  sc, estimator = pipeline, estimator_param_maps = grid,
+  evaluator = ml_multiclass_classification_evaluator(sc),
+  num_folds = 3, parallelism = 4
+)
+
+# Train the models
+cv_model <- ml_fit(cv, iris_tbl)
+```
+
+Once the models are trained, you can inspect the performance results by using the newly available helper function ml_validation_metrics():
+```{r metrics}
+ml_validation_metrics(cv_model)
+spark_disconnect(sc)
+```

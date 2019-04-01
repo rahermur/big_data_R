@@ -1,0 +1,198 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an R Markdown document for performing analysis of MovieLense Data and to recommend the new / untried movies to users. We use the R package sparklyr for building the recommender and compare it with the conventional recommender systems built earlier.
+
+```{r}
+# Library for loading CSV data
+library(RCurl)
+# Library for data tidying
+library(tidyr)
+# Library for data structure operations
+library(dplyr)
+library(knitr)
+# Library for plotting
+library(ggplot2)
+# Library for data display in tabular format
+library(DT)
+library(pander)
+library(reshape2)
+
+
+suppressWarnings(suppressMessages(library(recommenderlab)))
+```
+
+Data loading & preparation
+
+```{r loading}
+# We are using the MovieLens from the recommender lab package
+
+data(MovieLense, package = "recommenderlab")
+
+movielense <- MovieLense
+class(movielense)
+
+# Verifying records and variables
+nrow(movielense)
+
+ncol(movielense)
+
+# Loading the metadata that gets loaded with main dataset
+moviemeta <- MovieLenseMeta
+
+# Verifying records and variables
+nrow(moviemeta)
+
+ncol(moviemeta)
+
+pander(head(moviemeta), caption = "Sample Movie Meta Data")
+```
+```{r to_dataframe}
+# movies<- data.frame(scale(movielense, center=T, scale=T))
+movies <- as(movielense, "data.frame")
+dim(movies)
+
+# We would need the item as numeric , hence doing factors to uniquely identify
+# item of movie by assigning as itemid
+movies <- transform(movies, itemid = as.numeric(factor(item)))
+colnames(movies) <- c("user", "item", "rating", "itemid")
+dim(movies)
+
+# View(movies)
+
+# Forming the movieid/moviename mapping table for later reference
+moviename <- movies %>% select(item, itemid)
+
+# Since ths is made form the long format useritem table , we have duplicate rows.
+# Deleting duplicate rows, taking only distince
+moviename <- moviename %>% distinct(item, itemid)
+# Verify the movie
+dim(moviename)
+
+# We further select the data on basis on itemid , removing the named movie column
+moviesdata <- movies %>% select(-item)
+# View(moviesdata) View(moviename)
+
+# We need to do this as Spark which is later conencted to for ALS factorization
+# requires the user /item column be numeric
+moviesdata$user <- as.numeric(moviesdata$user)
+moviesdata$itemid <- as.numeric(moviesdata$itemid)
+
+
+# Now arrangeing by user and to wide format
+moviesdatawide <- reshape(moviesdata, idvar = "user", timevar = "itemid", direction = "wide") %>% 
+    arrange(user)
+dim(moviesdatawide)
+
+# View(moviesdatawide)
+
+
+# Store the userids as rownames for later use
+rownames(moviesdatawide) <- moviesdatawide$user
+moviesdatawide <- moviesdatawide %>% select(-user)
+
+# Store the moview ids for later use
+library(stringr)
+colnames(moviesdatawide) <- str_replace(colnames(moviesdatawide), "rating.", "")
+
+
+# Now we have both rating tables moviesdata in long form and moviesdatawide in
+# wide form
+
+# Since this is in long format, as needed but is mixed, we would prep the data in
+# such a way so as to identify the movies with a numerical value . This is
+# because in order to use Spark library functions we would need to use movie
+# lense data as dataframe and with the user and item as numeric columns
+
+mometa <- as(moviemeta, "data.frame")
+```
+
+
+```{r spark_con}
+library(sparklyr)
+
+# installed local version of Spark
+spark_install(version = "2.3.0", hadoop_version = "2.7")
+
+# Connect to your Spark cluster
+sc <- spark_connect(master = "local")
+# Check Print the version of Spark
+spark_version(sc)
+```
+
+```{r loading_into_spark}
+spmovies <- sdf_copy_to(spconn, moviesdata, "spmovies", overwrite = TRUE)
+spmometa <- sdf_copy_to(spconn, mometa, "spmometa", overwrite = TRUE)
+
+library(dplyr)
+src_tbls(spconn)
+
+```
+
+```{r ALS}
+# MAke Model
+model_als <- ml_als(spmovies, rating_col = "rating", user_col = "user", 
+    item_col = "itemid", max_iter = 10)
+summary(model_als)
+
+```
+
+```{r pred}
+# Calculate Predicton
+
+predictions <- ml_predict(model_als, spmovies)
+class(predictions)
+head(data.frame(predictions), 10)
+
+# Attach movie name via movie id joining
+alluseritems <- merge(predictions, moviename, by = c("itemid"))
+dim(alluseritems)
+
+alluseritemswide <- alluseritems %>% select(user, prediction, item) %>% spread(item, 
+    prediction) %>% arrange(user)
+
+dim(alluseritemswide)
+
+
+# View(alluseritemswide)
+
+# Extract the User and Item factor matrices from the model userfactormat <-
+# as.matrix(model_als$user.factors[,-1]) itemfactormat <-
+# as.matrix(model_als$item.factors[,-1])
+model_als$user_factors
+model_als$item_factors
+
+```
+
+
+```{r sample_user}
+# For random user, find predictions
+
+sampleuser1 <- collect(sample_n(predictions,1))
+sampleuser1
+
+sampleuser1pred <- alluseritems[which(alluseritems$user == sampleuser1$user), ]
+sampleuser1pred <- sampleuser1pred %>% select(user, item, rating, prediction)
+
+datatable(head(sampleuser1pred, 500))
+```
+
+```{r calculate_performace}
+
+predictions <- sdf_repartition(predictions, 4)
+predictions <- sdf_register(predictions, "predictions")
+
+model_als.RMSE <- ml_regression_evaluator(predictions, label_col = "rating",
+  prediction_col = "prediction", metric_name = "rmse")
+  
+#model_als.RMSE <- sqrt(mean((collect(predictions)$rating - collect(predictions)$prediction)^2))
+model_als.RMSE
+```
+
+Disconnect Spark
+
+```{r disconnect}
+spark_disconnect(sc)
+```

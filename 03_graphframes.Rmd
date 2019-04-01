@@ -1,0 +1,117 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Ins
+
+```{r install}
+install.packages("graphframes")
+# or, for the development version,
+# devtools::install_github("rstudio/graphframes")
+```
+
+
+```{r libraries}
+library(graphframes)
+library(sparklyr)
+library(dplyr)
+
+#spark_install(version = "2.1.0")
+sc <- spark_connect(master = "local", version = "2.1.0")
+```
+```{r load_data}
+flights_tbl <- spark_read_csv(sc, 'flights', "./data/flights/flights_sample.csv")
+
+```
+
+
+```{r vertices_edges}
+from_tbl <- flights_tbl %>% 
+  distinct(ORIGIN_AIRPORT_ID, ORIGIN_CITY_NAME) %>% 
+  transmute(id = as.character(ORIGIN_AIRPORT_ID), name = ORIGIN_CITY_NAME)
+
+to_tbl <- flights_tbl %>% 
+  distinct(DEST_AIRPORT_ID, DEST_CITY_NAME) %>% 
+  transmute(id = as.character(DEST_AIRPORT_ID), name = DEST_CITY_NAME)
+  
+vertices_tbl <- from_tbl %>%
+  sdf_bind_rows(to_tbl) %>% distinct(id, name)
+
+head(vertices_tbl)
+
+
+edges_tbl <- flights_tbl %>% 
+  transmute(src = as.character(ORIGIN_AIRPORT_ID), 
+            dst = as.character(DEST_AIRPORT_ID))
+
+#edges_tbl <- edges_tbl %>% group_by(src, dst) %>% count() %>% transmute(w = n)
+
+flights_graph = gf_graphframe(vertices_tbl, edges_tbl)
+flights_graph
+```
+
+
+```{r basic_page_rank}
+flights_pagerank <- flights_graph %>% gf_pagerank(reset_prob = 0.05, tol = 0.001)
+
+flights_pagerank$vertices %>% arrange(desc(pagerank))
+```
+
+Comparemoslo con la métrica del número de vuelos que salen o entrar de cada aeropuerto
+
+```{r n_fights}
+from_tbl <- flights_tbl %>% 
+  select(ORIGIN_AIRPORT_ID, ORIGIN_CITY_NAME) %>% 
+  transmute(id = ORIGIN_AIRPORT_ID, name = ORIGIN_CITY_NAME)
+
+to_tbl <- flights_tbl %>% 
+  select(DEST_AIRPORT_ID, DEST_CITY_NAME) %>% 
+  transmute(id = DEST_AIRPORT_ID, name = DEST_CITY_NAME)
+  
+total_tbl <- from_tbl %>%
+  sdf_bind_rows(to_tbl) %>% group_by(id, name) %>% count()
+
+total_tbl %>% arrange(desc(n))
+```
+
+Mucho más fácil cacularlo directamente utilizando las métricas del grafo
+
+```{r degrees}
+flights_graph %>% gf_degrees() %>% arrange(desc(degree))
+```
+
+```{r shortest_path}
+gf_cache(flights_graph)
+flight_shortest = gf_shortest_paths(flights_graph, landmarks = c("10397", "12892"))
+flight_shortest %>% collect()
+```
+
+¿Hay alguna región con vuelos que no esté conectada con el resto de la red?
+
+```{r connected_comp}
+spark_set_checkpoint_dir(sc, tempdir())
+
+cc <- gf_connected_components(flights_graph)
+
+cc %>% filter(component>0)
+```
+
+```{r triangles}
+flights_graph %>% gf_triangle_count() %>% arrange(desc(count))
+```
+
+```{r scc}
+ssp = flights_graph %>% gf_shortest_paths(landmarks = c("10800"))
+#View((tbl_df(ssp))
+
+
+d_paths <- flights_graph %>%
+  gf_shortest_paths(landmarks = c("10800")) %>%
+  collect()
+
+max(unlist(d_paths$distances))
+which.max(unlist(d_paths$distances))
+d_paths[133, ]
+
+```

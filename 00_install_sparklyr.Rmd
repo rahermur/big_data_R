@@ -1,0 +1,128 @@
+---
+title: "00_sparklyr"
+output: html_document
+---
+
+## Sparklyr
+
+Sparklyr es un paquete de R que nos permite trabajar con datos desde un cluster de Spark. Utiliza la interfaz de dplyr, lo que quiere decir que podemos aplicar la misma lógica y estilo en la programación en R que cuando usamos dplyr, solo que el dato por detras se esta procesando desde Spark.
+
+Podemos filtrar seleccionar y construir procesos ETL desde R conectados a Spark. Esto quiere decir que una vez procesados podemos recoger los resultados de R para analizarlos y visualizarlos utilizando cualquier otra librería de las que ya conocemos en R. 
+
+También se puede hacer uso de la librería de machine learning de Sparklyr para construir modelos con el dato distribuido. 
+
+A continuación vamos a seguir las isntrucciones de https://spark.rstudio.com/ para instalar correctamente Sparklyr en Rstudio.
+
+
+```{r instalation}
+#You can install the sparklyr package from CRAN as follows:
+install.packages("sparklyr")
+# You should also install a local version of Spark for development purposes:
+library(sparklyr)
+spark_install(version = "2.3")
+#devtools::install_github("rstudio/sparklyr")
+
+```
+
+Spark is todavía una tecnología muy reciente y Sparklyr todavía más, por lo que no tiene disponible todas las funcionalidades de Spark. Las interfaces de Scala y Python están mucho más maduras en este sentido. 
+
+Trabajando con Spark, si es posible es preferible utilizar Scala o Python. Sin embargo, por coherencia con otras partes de un mismo proyecto, es posible que en ocasiones queramos tener compatibilidad con R. En este caso Sparklyr es nuestar mejor alternativa. 
+
+A continuación vemos como conectarnos a Spark
+
+```{r connection}
+library(sparklyr)
+sc <- spark_connect(master = "local")
+
+# TRUE if spark is connected 
+spark_connection_is_open(sc)
+```
+
+Para cerrar la sesión con Spark:
+
+```{r disconect}
+spark_disconnect(sc)
+
+connection_is_open(sc)
+```
+
+
+Vamos a cargar nuestro primer data frame en Spark. Utilizaremos este dataset: https://www.kaggle.com/rtatman/chocolate-bar-ratings
+
+```{r load_df}
+chocolate <- read.csv('./data/flavors_of_cacao.csv')
+library(dplyr)
+sc <- spark_connect(master = "local")
+# Use str() to explore R dataframe
+str(chocolate)
+# Copy dataframe to the Spark cluster using copy_to() 
+chocolate_tbls <- copy_to(sc, chocolate)
+# See which data frames are available in Spark, using src_tbls()
+src_tbls(sc)
+```
+
+¿Qué tipo de clase es "chocolate_tbls"?
+
+Una tbl_spark, representa un objeto dplyr-compatible y es la interfaz con un DataFrame Spark.Esto se posible porque dplyr permite gruardar los datos de manera remota, en diferentes bases de datos, en este caso Spark. Para conexiones remotas simplemente guarda una referente a dicha conexión por lo que en la RAM local ocupamos muy poco espacio.
+
+Comprueba el tamaño de chocolate_tbls y chocolate utilizando object_size() del paquete pryr. Aunque tuviésemos un dataset muy grande el tamaño de la tbl_spark siempre será pequeño.
+
+```{r check_size}
+require('pryr')
+object_size(chocolate_tbls)
+object_size(chocolate)
+```
+
+tbl() nos permiete acceder a los dataframes de Spark incluso si hemos borrado la referencia desde el copy_to la primera vez. Compruebalo. 
+
+```{r recover}
+rm(chocolate_tbls)
+chocolate_tbls <- tbl(sc, "chocolate")
+```
+
+
+Selecciona todos los registros de chocolate Blend (utiliza la variable Bean_Type y recuerda aplicar la sintaxis de dplyr)
+
+```{r filter}
+chocolate_tbls %>% filter(Bean_Type == "Blend")
+```
+
+Haz lo mismo pero con el dataframe en local:
+
+```{r filter_dplyr}
+chocolate %>% filter(Bean.Type == "Blend")
+```
+
+¿Cuantos ratings tenemos para chocolates de tipo Blend y cual es su rating promedio?
+
+```{r count}
+chocolate_tbls %>% 
+  filter(Bean_Type == "Blend") %>%
+  summarize(count = n(), mean_rating = mean(Rating))
+
+```
+
+Comparémoslo con el resto de tipos:
+
+```{r group by}
+types <- chocolate_tbls %>% 
+  group_by(Bean_Type) %>%
+  summarize(count = n(), mean_rating = mean(Rating))
+
+collect(types)
+```
+
+¿Cual es el tipo con el promedio de ratings más alto?
+
+```{r order_by}
+types <- chocolate_tbls %>% 
+  group_by(Bean_Type) %>%
+  summarize(count = n(), mean_rating = mean(Rating))
+  
+
+types %>% arrange(desc(mean_rating))
+```
+
+```{r close}
+spark_disconnect(sc)
+```

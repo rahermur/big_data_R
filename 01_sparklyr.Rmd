@@ -1,0 +1,37 @@
+Conectamos a Spark
+
+```{r connection}
+library(sparklyr)
+sc <- spark_connect(master = "local")
+
+# TRUE if spark is connected 
+spark_connection_is_open(sc)
+```
+
+Cargamos el dataset de vuelos. La base de datos se compone de varias tablas. Vamos a trabajar primero con flights_sample.csv airlines.csv y airports.csv
+
+```{r cache_data}
+# read flights table directly into Spark
+flights_tbl <- spark_read_csv(sc, 'flights', "./data/flights/flights_sample.csv")
+# object_size(flights_tbl) remember that flights_tbl is a pointer no the full table (that is in Spark)
+
+# read airlines table into Spark
+airlines_tbl <- spark_read_csv(sc, 'airlines', "./data/flights/airlines.csv", header = FALSE, columns = c("AIRLINE_ID", "AIRLINE_NAME", "AIRLINE_ALIAS", "IATA", "ICAO", "CALLSIGN", "COUNTRY", "ACTIVE"))
+
+# read airports table into Spark
+airports_tbl <- spark_read_csv(sc, 'airports', "./data/flights/airports.csv")
+``` 
+
+```{r create_gain}
+
+# Filter records and create target variable 'gain'
+model_data <- flights_tbl %>%
+  filter(!is.na(ARR_DELAY) & !is.na(DEP_DELAY) & !is.na(DISTANCE)) %>%
+  filter(DEP_DELAY > 15 & DEP_DELAY < 240) %>%
+  filter(ARR_DELAY > -60 & ARR_DELAY < 360) %>%
+  filter(YEAR >= 2014 & YEAR <= 2015) %>%
+  left_join(airlines_tbl, by = c("UNIQUE_CARRIER" = "AIRLINE_ID")) %>%
+  mutate(GAIN = DEP_DELAY - ARR_DELAY) %>%
+  select(YEAR, MONTH, ARR_DELAY, DEP_DELAY, DISTANCE, UNIQUE_CARRIER, TAIL_NUM, GAIN)
+
+```

@@ -1,0 +1,166 @@
+---
+title: "Spark pipelines"
+output: html_notebook
+---
+
+## Class catchup
+
+```{r}
+library(tidyverse)
+library(sparklyr)
+library(lubridate)
+top_rows <- read.csv("./data/flights/flights_sample.csv", nrows = 5)
+file_columns <- top_rows %>%
+  rename_all(tolower) %>%
+  map(function(x) "character")
+conf <- spark_config()
+conf$`sparklyr.cores.local` <- 4
+conf$`sparklyr.shell.driver-memory` <- "8G"
+conf$spark.memory.fraction <- 0.9
+sc <- spark_connect(master = "local", config = conf, version = "2.0.0")
+spark_flights <- spark_read_csv(
+  sc,
+  name = "flights",
+  path = "./data/flights/flights_sample.csv",
+  memory = FALSE,
+  columns = file_columns,
+  infer_schema = FALSE
+)
+```
+
+## Construir un pipeline
+*Step-by-step of how to build a new Spark pipeline*
+
+1. Usa `sdf_partition()` para crear un data set del 70% para training y otro del 30% para testing de la tabla *flights*.
+
+
+```{r}
+model_data <- 
+```
+
+2. Sustituye los varios a NA de arrdelay y depdelay por 0 y selecciona las variables a modelar asignandolas a `pepeline_df`. Recuerda transformarlas a valores numéricos
+
+```{r}
+pipeline_df <- model_data$training %>%
+  mutate(
+    arrdelay = ifelse(arrdelay == "NA", 0, arrdelay),
+    depdelay = ifelse(depdelay == "NA", 0, depdelay)
+  ) %>%
+  select(
+    month,
+    dayofmonth,
+    arrtime,
+    arrdelay,
+    depdelay,
+    crsarrtime,
+    crsdeptime,
+    distance
+  ) %>%
+  mutate_all(as.numeric)
+```
+
+
+3. Empieza un nuevo pipeline con `ml_pipeline()` y `dplyr`-pipe en `ft_dplyr_transformer()`.  Usa `pipeline_df` como argumento de `tbl` 
+
+```{r}
+ml_pipeline(sc) %>%
+  
+```
+
+4. Utiliza `ft_binarizer()` para determinar si *arrdelay* es mayor o no de 15 minutos
+```{r}
+```
+
+5. Utiliza `ft_bucketizer()`. Para dividir *dephour* en 6 segmentos iguales de 4 horas.
+
+```{r}
+```
+
+6. Añade `ft_r_formula()` para modelar *arrdelay* y *dephour* frente a *depdelay*.
+```{r}
+```
+
+7. Añade al "Pipe" una regresión logsitica con `ml_logistic_regression()`
+```{r}
+```
+
+
+8. Asgina el pipeline completo a una nueva variable: `flights_pipeline`
+```{r}
+```
+
+## 8.2 - Fit, evaluate, save
+
+1. Ajusta Fit (train) el `flights_pipeline` usando el conjunto de entrenamiento de `model_data`. La función es `ml_fit()`
+```{r}
+model <- 
+```
+
+2 Usa el recien ajustado modelo para evaluar el performance de las predicciones en el dato de test (`ml_transform()`)
+```{r}
+predictions <- 
+```
+
+3. Usa `group_by()`/ `tally()` para mirar el desempeño del modelo
+```{r}
+predictions %>%
+  group_by(delayed, prediction) %>%
+  tally()
+```
+
+4. guarda el modelo en disco usando `ml_save()`
+```{r}
+```
+
+5. guarda el pipeline en disco usando `ml_save()`
+```{r}
+```
+
+6. Cierra la sesión de Spark 
+```{r}
+spark_disconnect(sc)
+```
+## 8.3 - Reload model
+*Use the saved model inside a different Spark session*
+
+1. Open a new Spark connection and reload the data
+1. Abre una nueva sesión de Spark y vuelve a cargar los datos
+```{r}
+library(sparklyr)
+sc <- spark_connect(master = "local", version = "2.3.0")
+spark_flights <- spark_read_csv(
+  sc,
+  name = "flights",
+  path = "./data/flights/flights_sample.csv",
+  memory = FALSE,
+  columns = file_columns,
+  infer_schema = FALSE
+)
+```
+
+2. Usa `ml_load()` para cargar el modelo directamente en una sesión de Spark
+```{r}
+```
+
+
+3.  Filtra la tabla para coger el valor más reciente del que queremos sacar predicciones y asginalo a *current*. 
+```{r}
+library(lubridate)
+current <- tbl(sc, "flights") %>%
+  filter(
+    month == !! month(now()),
+    dayofmonth == !! day(now())
+  )
+show_query(current)
+```
+
+4. Corre las predicciones sobre `current` usando `ml__transform()`.
+```{r}
+new_predictions <- 
+```
+
+6. Saca una cuenta rápida del valor esperado en retraso de los vuelos. El campo a chequear se llama `prediction`
+```{r}
+new_predictions %>%
+  summarise(late_fligths = sum(prediction, na.rm = TRUE))
+```

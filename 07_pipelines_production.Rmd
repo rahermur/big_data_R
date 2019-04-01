@@ -1,0 +1,58 @@
+## Pipelines in Production
+
+Earlier this year, we announced support for ML Pipelines in sparklyr, and discussed how one can persist models onto disk. While that workflow is appropriate for batch scoring of large datasets, we also wanted to enable real-time, low-latency scoring using pipelines developed with sparklyr. To enable this, we’ve developed the mleap package, available on CRAN, which provides an interface to the MLeap open source project.
+
+MLeap allows you to use your Spark pipelines in any Java-enabled device or service. This works by serializing Spark pipelines which can later be loaded into the Java Virtual Machine (JVM) for scoring without requiring a Spark cluster. This means that software engineers can take Spark pipelines exported with sparklyr and easily embed them in web, desktop or mobile applications.
+
+To get started, simply grab the package from CRAN and install the necessary dependencies:
+
+```{r install}
+install.packages("mleap")
+library(mleap)
+install_maven()
+install_mleap()
+
+library(mleap)
+```
+Then, build a pipeline as usual:
+
+```{r create_pipeline}
+library(sparklyr)
+sc <- spark_connect(master = "local", version = "2.2.0")
+mtcars_tbl <- sdf_copy_to(sc, mtcars)
+
+# Create a pipeline and fit it
+pipeline <- ml_pipeline(sc) %>%
+  ft_binarizer("hp", "big_hp", threshold = 100) %>%
+  ft_vector_assembler(c("big_hp", "wt", "qsec"), "features") %>%
+  ml_gbt_regressor(label_col = "mpg")
+pipeline_model <- ml_fit(pipeline, mtcars_tbl)
+```
+Once we have the pipeline model, we can export it via ml_write_bundle():
+
+```{r write_bundle}
+# Export model
+model_path <- file.path(tempdir(), "mtcars_model.zip")
+transformed_tbl <- ml_transform(pipeline_model, mtcars_tbl)
+ml_write_bundle(pipeline_model, transformed_tbl, model_path)
+spark_disconnect(sc)
+```
+At this point, we’re ready to use mtcars_model.zip in other applications. Notice that the following code does not require Spark:
+
+# Import model
+```{r import}
+model <- mleap_load_bundle(model_path)
+
+# Create a data frame to be scored
+newdata <- tibble::tribble(
+  ~qsec, ~hp, ~wt,
+  16.2,  101, 2.68,
+  18.1,  99,  3.08
+)
+```
+# Transform the data frame
+```{r transform}
+transformed_df <- mleap_transform(model, newdata)
+dplyr::glimpse(transformed_df)
+```
+Notice that MLeap requires Spark 2.0 to 2.3. You can find additional details in the production pipelines guide.

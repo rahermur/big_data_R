@@ -1,0 +1,40 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r connection}
+library(sparklyr)
+library(dplyr)
+library(ggplot2)
+sc <- spark_connect(master = "local")
+
+# TRUE if spark is connected 
+spark_connection_is_open(sc)
+```
+
+
+```{r cache_data}
+# read flights table directly into Spark
+flights_tbl <- spark_read_csv(sc, 'flights', "./data/flights/flights_sample.csv")
+flights_tbl <- flights_tbl %>% mutate(ARR_DELAY = as.numeric(ARR_DELAY), ARR_TIME = as.numeric(ARR_TIME), 
+                                      DEP_DELAY = as.numeric(DEP_DELAY), DEP_TIME = as.numeric(DEP_TIME) )
+
+tally(flights_tbl)
+``` 
+
+
+```{r}
+glimpse(flights_tbl)
+```
+
+Using Departure delay we can
+```{r}
+ft_binarizer(
+  filter(flights_tbl, !is.na(ARR_DELAY)),
+  input_col = "ARR_DELAY",
+  output_col = "DELAYED",
+  threshold = 15
+  )
+```

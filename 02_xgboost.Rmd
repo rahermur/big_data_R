@@ -1,0 +1,51 @@
+## XGBoost
+
+sparkxgb is a new sparklyr extension that can be used to train XGBoost models in Spark. sparkxgb is available on CRAN and can be installed as follows:
+```{r install}
+install.packages("sparkxgb")
+```
+We can then use xgboost_classifier() to train and ml_predict() to predict over large datasets with ease:
+
+```{r xgboost_classifier}
+library(sparkxgb)
+library(sparklyr)
+library(dplyr)
+
+sc <- spark_connect(master = "local")
+iris <- copy_to(sc, iris)
+
+xgb_model <- xgboost_classifier(iris,
+                                Species ~ .,
+                                num_class = 3,
+                                num_round = 50,
+                                max_depth = 4)
+
+xgb_model %>%
+  ml_predict(iris) %>%
+  select(Species, predicted_label, starts_with("probability_")) %>%
+  glimpse()
+
+```
+
+
+You can read more about sparkxgb under its README file. Note that Windows is currently unsupported.
+
+
+## Broom
+
+While support for broom in Spark through sparklyr has been under development for quite some time, this release marks the completion of all modeling functions. For instance, we can now augment using an ALS model with ease:
+
+```{r augment}
+# augment()' not yet supported for ml_model_xgboost_classificationml_model_classificationml_model_prediction
+#xgb_model %>%  augment()
+
+
+movies <- data.frame(user   = c(1, 2, 0, 1, 2, 0),
+                     item   = c(1, 1, 1, 2, 2, 0),
+                     rating = c(3, 1, 2, 4, 5, 4))
+
+copy_to(sc, movies) %>%
+  ml_als(rating ~ user + item) %>%
+  augment()
+
+``` 
