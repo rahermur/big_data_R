@@ -11,7 +11,8 @@ Podemos filtrar seleccionar y construir procesos ETL desde R conectados a Spark.
 
 También se puede hacer uso de la librería de machine learning de Sparklyr para construir modelos con el dato distribuido. 
 
-A continuación vamos a seguir las isntrucciones de https://spark.rstudio.com/ para instalar correctamente Sparklyr en Rstudio.
+A continuación vamos a seguir las isntrucciones de https://spark.rstudio.com/ para instalar correctamente Sparklyr en Rstudio.  
+
 
 
 ```{r instalation}
